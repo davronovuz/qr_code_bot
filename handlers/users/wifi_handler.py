@@ -1,19 +1,16 @@
-# wifi_handlers.py
+# wifi_handlers.py (fix)
 import asyncio
 import logging
+import html
 from aiogram import types
 from loader import dp, wifi_db, user_db, bot
-from data.config import ADMINS  # list yoki set of super-admin telegram ids
+from data.config import ADMINS
 
 logger = logging.getLogger(__name__)
 
-# yordamchi: admin tekshiruvi (super-admin yoki sayt adminlari)
 async def is_admin(telegram_id: int) -> bool:
-    # super-admin (config)
     if telegram_id in ADMINS:
         return True
-
-    # oddiy adminlar user_db orqali (sening user_db API: select_user va check_if_admin)
     try:
         user = await asyncio.to_thread(user_db.select_user, telegram_id=telegram_id)
         if not user:
@@ -24,8 +21,7 @@ async def is_admin(telegram_id: int) -> bool:
         logger.exception("Error checking admin status: %s", e)
         return False
 
-
-# /setwifi <new_password>  (faqat adminlar)
+# /setwifi <new_password>
 @dp.message_handler(commands=["setwifi"])
 async def cmd_setwifi(message: types.Message):
     telegram_id = message.from_user.id
@@ -35,21 +31,24 @@ async def cmd_setwifi(message: types.Message):
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        await message.reply("Foydalanish: /setwifi <yangi_parol>\nMasalan: /setwifi mynewpass123")
+        # Escaping angle brackets so Telegram HTML parse_mode won't crash
+        usage = "Foydalanish: /setwifi &lt;yangi_parol&gt;\nMasalan: /setwifi mynewpass123"
+        # send with parse_mode="HTML" (bot global parse_mode ham HTML bo'lsa shu ham ishlaydi)
+        await message.reply(usage, parse_mode="HTML")
         return
 
     new_pass = parts[1].strip()
-
     try:
+        # saqlash (sync DB => to_thread)
         await asyncio.to_thread(wifi_db.set_password, new_pass, f"set by {telegram_id}")
-        await message.reply("✅ Wi-Fi parol muvaffaqiyatli yangilandi.")
+        # yuborishda parolni <code> ichida jo'natamiz va HTML-escape qilamiz
+        await message.reply(f"✅ Wi-Fi parol muvaffaqiyatli yangilandi.\nParol: <code>{html.escape(new_pass)}</code>", parse_mode="HTML")
         logger.info("Wi-Fi password set by %s", telegram_id)
     except Exception as e:
         logger.exception("Error setting wifi password: %s", e)
         await message.reply("❌ Parolni saqlashda xatolik yuz berdi.")
 
-
-# /delwifi  (faqat adminlar) - barcha parollarni o'chiradi (sen bitta global parol ishlatasan)
+# /delwifi
 @dp.message_handler(commands=["delwifi"])
 async def cmd_delwifi(message: types.Message):
     telegram_id = message.from_user.id
@@ -65,14 +64,14 @@ async def cmd_delwifi(message: types.Message):
         logger.exception("Error removing wifi password: %s", e)
         await message.reply("❌ Parolni oʻchirishda xatolik yuz berdi.")
 
-
-# /getwifi - foydalanuvchilar uchun (minimal)
+# /getwifi
 @dp.message_handler(commands=["getwifi"])
 async def cmd_getwifi(message: types.Message):
     try:
         pw = await asyncio.to_thread(wifi_db.get_password)
         if pw:
-            await message.answer(f"🔐 Wi-Fi parol: <b>{pw}</b>", parse_mode="HTML")
+            # always escape before inserting into HTML
+            await message.answer(f"🔐 Wi-Fi parol: <code>{html.escape(pw)}</code>", parse_mode="HTML")
         else:
             await message.answer("❌ Hozirda Wi-Fi parol saqlanmagan. Iltimos admin bilan bog'laning.")
     except Exception as e:
